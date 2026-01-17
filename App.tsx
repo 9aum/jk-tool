@@ -62,7 +62,7 @@ export default function App() {
                     <Stack.Screen
                         name="Home"
                         component={HomeScreen}
-                        options={{ title: 'JK-Tool V22' }}
+                        options={{ title: 'JK-Tool' }}
                     />
                     <Stack.Screen
                         name="DeviceDetail"

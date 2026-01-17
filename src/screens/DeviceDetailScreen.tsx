@@ -60,14 +60,18 @@ function StatBox({ label, value, unit }: { label: string; value: string; unit: s
 }
 
 // Status Indicator V18
-function StatusIndicator({ label, isActive }: { label: string; isActive: boolean | null }) {
+function StatusIndicator({ label, isActive, onPress }: { label: string; isActive: boolean | null; onPress?: () => void }) {
     if (isActive === null) return null;
     return (
-        <View style={[styles.statusBadge, isActive ? styles.statusActive : styles.statusInactive]}>
+        <TouchableOpacity
+            style={[styles.statusBadge, isActive ? styles.statusActive : styles.statusInactive]}
+            onPress={onPress}
+            activeOpacity={0.7}
+        >
             <Text style={styles.statusText} numberOfLines={1} adjustsFontSizeToFit>
                 {label}: {isActive ? 'ON' : 'OFF'}
             </Text>
-        </View>
+        </TouchableOpacity>
     );
 }
 
@@ -105,6 +109,17 @@ export default function DeviceDetailScreen({ route, navigation }: Props) {
             pollIntervalRef.current = null;
         }
     };
+
+    const chargeStatusRef = useRef<boolean | null>(null);
+    const dischargeStatusRef = useRef<boolean | null>(null);
+
+    useEffect(() => {
+        chargeStatusRef.current = chargeStatus;
+    }, [chargeStatus]);
+
+    useEffect(() => {
+        dischargeStatusRef.current = dischargeStatus;
+    }, [dischargeStatus]);
 
     useEffect(() => {
         RemoteLogger.log('DeviceDetail: useEffect mount');
@@ -230,21 +245,94 @@ export default function DeviceDetailScreen({ route, navigation }: Props) {
         try { await BleService.sendCommand(device.id, cmd); } catch (e) { }
     };
 
+    const sendRobustCommand = async (register: number, value: number, currentStatusRef: React.MutableRefObject<boolean | null>) => {
+        const targetBool = value === 1;
+
+        for (let i = 0; i < 3; i++) {
+            try {
+                // Determine if we need to send
+                // Reading ref directly to skip if already in state? User said "if status not changed, retry"
+                // So always send first then check.
+
+                // We use BleService.sendControlCommand BUT we want longer delay.
+                // BleService.sendControlCommand waits 500ms then refreshes.
+                // User wants 3.5s delay. 
+
+                await BleService.sendControlCommand(device.id, register, value);
+
+                setStatus(`Verifying ${i + 1}/3...`);
+                // Wait 3.5s (Requested adjustment)
+                await new Promise(resolve => setTimeout(resolve, 3500));
+
+                // Force Refresh status just in case
+                await safeSendCommand(0x96);
+
+                // Wait distinct time for data to arrive
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                if (currentStatusRef.current === targetBool) {
+                    return true;
+                }
+            } catch (e) {
+                console.log("Retry error", e);
+            }
+        }
+        return false;
+    };
+
     const confirmNuke = async () => {
         setModalVisible(false);
         setNuking(true);
         const { targetState } = modalConfig;
 
         try {
-            await BleService.sendControlCommand(device.id, 0x1d, targetState);
-            // V20: Increased delay to 2.5s (+1s)
-            await new Promise(resolve => setTimeout(resolve, 2500));
-            await BleService.sendControlCommand(device.id, 0x1e, targetState);
+            setStatus('Executing Charge...');
+            const chargeSuccess = await sendRobustCommand(0x1d, targetState, chargeStatusRef);
+
+            setStatus('Executing Discharge...');
+            const dischargeSuccess = await sendRobustCommand(0x1e, targetState, dischargeStatusRef);
+
+            if (!chargeSuccess || !dischargeSuccess) {
+                // Option: Alert user if failed after 3 tries
+                // Alert.alert("Notice", "Some commands required multiple retries or failed. Check status.");
+            }
+
         } catch (e) {
             Alert.alert('Error', String(e));
         } finally {
+            setStatus('Connected');
             setNuking(false);
         }
+    };
+
+    const handleToggleSingle = (type: 'charge' | 'discharge') => {
+        if (nuking) return;
+
+        const isCharge = type === 'charge';
+        const currentVal = isCharge ? chargeStatus : dischargeStatus;
+        if (currentVal === null) return;
+
+        const targetState = currentVal ? 0 : 1;
+        const action = currentVal ? "Disable" : "Enable";
+        const label = isCharge ? "Charge" : "Discharge";
+
+        setModalConfig({
+            title: `${action} ${label}`,
+            message: `Are you sure you want to ${action.toUpperCase()} ${label}?`,
+            targetState: targetState,
+            color: currentVal ? 'red' : 'green',
+        });
+
+        // We override the confirm function for this specific modal instance or use a flag?
+        // Reuse confirmNuke logic but maybe we need single mode.
+        // Actually, confirmNuke iterates simply.
+        // Let's make a specific single confirm function or pass a param.
+        // Easiest is to make a specific function for the modal confirm button.
+
+        // Quick Refactor: Store 'mode' in modalConfig
+        // mode: 'all' | 'charge' | 'discharge'
+
+        setModalVisible(true);
     };
 
     const handleNukePress = () => {
@@ -260,7 +348,8 @@ export default function DeviceDetailScreen({ route, navigation }: Props) {
             title: title,
             message: `Are you sure you want to ${actionText} Charge & Discharge?`,
             targetState: targetState,
-            color: color
+            color: color,
+            mode: 'all'
         });
         setModalVisible(true);
     };
@@ -329,9 +418,35 @@ export default function DeviceDetailScreen({ route, navigation }: Props) {
 
                             {/* Row 4: Status Buttons V20 */}
                             <View style={styles.statusRow}>
-                                <StatusIndicator label="Charge" isActive={chargeStatus} />
+                                <StatusIndicator
+                                    label="Charge"
+                                    isActive={chargeStatus}
+                                    onPress={() => {
+                                        setModalConfig({
+                                            title: chargeStatus ? "Disable Charge" : "Enable Charge",
+                                            message: `Turn ${chargeStatus ? "OFF" : "ON"} Charging?`,
+                                            targetState: chargeStatus ? 0 : 1,
+                                            color: chargeStatus ? 'red' : 'green',
+                                            mode: 'charge'
+                                        });
+                                        setModalVisible(true);
+                                    }}
+                                />
                                 <View style={{ width: 8 }} /> {/* V22: Spacer Reduced (20 -> 8) */}
-                                <StatusIndicator label="Discharge" isActive={dischargeStatus} />
+                                <StatusIndicator
+                                    label="Discharge"
+                                    isActive={dischargeStatus}
+                                    onPress={() => {
+                                        setModalConfig({
+                                            title: dischargeStatus ? "Disable Discharge" : "Enable Discharge",
+                                            message: `Turn ${dischargeStatus ? "OFF" : "ON"} Discharging?`,
+                                            targetState: dischargeStatus ? 0 : 1,
+                                            color: dischargeStatus ? 'red' : 'green',
+                                            mode: 'discharge'
+                                        });
+                                        setModalVisible(true);
+                                    }}
+                                />
                             </View>
 
                             {/* Footer: Nuke Button */}
@@ -358,7 +473,23 @@ export default function DeviceDetailScreen({ route, navigation }: Props) {
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     style={[styles.modalBtnConfirm, { backgroundColor: modalConfig.color === 'red' ? '#FF3B30' : '#4CD964' }]}
-                                    onPress={confirmNuke}
+                                    onPress={async () => {
+                                        if (modalConfig.mode === 'all') {
+                                            await confirmNuke();
+                                        } else if (modalConfig.mode === 'charge') {
+                                            setModalVisible(false);
+                                            setNuking(true);
+                                            await sendRobustCommand(0x1d, modalConfig.targetState, chargeStatusRef);
+                                            setNuking(false);
+                                            setStatus('Connected');
+                                        } else if (modalConfig.mode === 'discharge') {
+                                            setModalVisible(false);
+                                            setNuking(true);
+                                            await sendRobustCommand(0x1e, modalConfig.targetState, dischargeStatusRef);
+                                            setNuking(false);
+                                            setStatus('Connected');
+                                        }
+                                    }}
                                 >
                                     <Text style={styles.modalBtnTextConfirm}>Confirm</Text>
                                 </TouchableOpacity>
