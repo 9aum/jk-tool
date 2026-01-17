@@ -12,6 +12,8 @@ import RNRestart from 'react-native-restart';
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
 const AUTO_SCAN_KEY = 'JK_TOOL_AUTO_SCAN';
+const TARGET_DEVICE_KEY = 'JK_TOOL_TARGET_DEVICE';
+let hasConnectedSession = false; // V22: Track if we've initiated a connection in this session
 
 export default function HomeScreen({ navigation }: Props) {
     const [devices, setDevices] = useState<JKBMSDevice[]>([]);
@@ -58,6 +60,23 @@ export default function HomeScreen({ navigation }: Props) {
 
     const checkAutoScan = async () => {
         try {
+            // V22: Check for Target Device (Restart-and-Connect Strategy)
+            const targetDeviceJson = await AsyncStorage.getItem(TARGET_DEVICE_KEY);
+            if (targetDeviceJson) {
+                RemoteLogger.log('Target Device found. Auto-connecting...');
+                await AsyncStorage.removeItem(TARGET_DEVICE_KEY);
+                const targetDevice = JSON.parse(targetDeviceJson);
+
+                // Mark session as dirty immediately
+                hasConnectedSession = true;
+
+                // Allow UI to settle then navigate
+                setTimeout(() => {
+                    navigation.navigate('DeviceDetail', { device: targetDevice });
+                }, 500);
+                return;
+            }
+
             const autoScan = await AsyncStorage.getItem(AUTO_SCAN_KEY);
             if (autoScan === 'true') {
                 RemoteLogger.log('Auto-Scan flag found. Waiting for permissions...');
@@ -119,10 +138,28 @@ export default function HomeScreen({ navigation }: Props) {
         }
     };
 
-    const connectToDevice = (device: JKBMSDevice) => {
+    const connectToDevice = async (device: JKBMSDevice) => {
         if (scanning) {
             BleService.stopScan();
         }
+
+        // V22: Restart-and-Connect Strategy
+        // If we have already connected to a device in this session, 
+        // we must RESTART the app to clear the BLE stack before connecting to another (or the same) one.
+        if (hasConnectedSession) {
+            try {
+                // Save target device
+                // storage only needs id and name. deviceObject is not serializable/needed for connection start
+                const minimalDevice = { id: device.id, name: device.name, rssi: device.rssi };
+                await AsyncStorage.setItem(TARGET_DEVICE_KEY, JSON.stringify(minimalDevice));
+                RNRestart.Restart();
+            } catch (e) {
+                Alert.alert("Error", "Failed to restart for connection.");
+            }
+            return;
+        }
+
+        hasConnectedSession = true;
         navigation.navigate('DeviceDetail', { device });
     };
 
