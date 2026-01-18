@@ -5,7 +5,6 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RootStackParamList } from '../../App';
 import BleService, { JKBMSDevice } from '../services/BleService';
-import RemoteLogger from '../services/RemoteLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNRestart from 'react-native-restart';
 
@@ -63,7 +62,7 @@ export default function HomeScreen({ navigation }: Props) {
             // V22: Check for Target Device (Restart-and-Connect Strategy)
             const targetDeviceJson = await AsyncStorage.getItem(TARGET_DEVICE_KEY);
             if (targetDeviceJson) {
-                RemoteLogger.log('Target Device found. Auto-connecting...');
+                console.log('Target Device found. Auto-connecting...');
                 await AsyncStorage.removeItem(TARGET_DEVICE_KEY);
                 const targetDevice = JSON.parse(targetDeviceJson);
 
@@ -79,7 +78,7 @@ export default function HomeScreen({ navigation }: Props) {
 
             const autoScan = await AsyncStorage.getItem(AUTO_SCAN_KEY);
             if (autoScan === 'true') {
-                RemoteLogger.log('Auto-Scan flag found. Waiting for permissions...');
+                console.log('Auto-Scan flag found. Waiting for permissions...');
                 await AsyncStorage.removeItem(AUTO_SCAN_KEY);
                 setAutoScanPending(true); // V21: Set pending state instead of immediate timeout
             }
@@ -122,7 +121,7 @@ export default function HomeScreen({ navigation }: Props) {
             // Check for dirty connections (V17 Logic)
             const connectedDevices = await BleService.getConnectedDevices();
             if (connectedDevices.length > 0) {
-                RemoteLogger.log('Dirty connection found (' + connectedDevices[0].id + '). Nuking app...');
+                console.log('Dirty connection found (' + connectedDevices[0].id + '). Nuking app...');
                 await AsyncStorage.setItem(AUTO_SCAN_KEY, 'true');
                 RNRestart.Restart();
                 return;

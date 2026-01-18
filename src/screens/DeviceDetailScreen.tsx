@@ -5,7 +5,6 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RootStackParamList } from '../../App';
 import BleService from '../services/BleService';
-import RemoteLogger from '../services/RemoteLogger';
 import { Buffer } from 'buffer';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DeviceDetail'>;
@@ -122,7 +121,7 @@ export default function DeviceDetailScreen({ route, navigation }: Props) {
     }, [dischargeStatus]);
 
     useEffect(() => {
-        RemoteLogger.log('DeviceDetail: useEffect mount');
+        console.log('DeviceDetail: useEffect mount');
         mountedRef.current = true;
 
         const handleData = ({ type, data }: { type: number; data: Buffer }) => {

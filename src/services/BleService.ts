@@ -3,7 +3,6 @@ import { BleManager, Device, Subscription } from 'react-native-ble-plx';
 import { Platform, PermissionsAndroid } from 'react-native';
 import { Buffer } from 'buffer';
 import EventEmitter from 'events';
-import RemoteLogger from './RemoteLogger';
 
 export interface JKBMSDevice {
     id: string;
@@ -65,7 +64,6 @@ class BleService extends EventEmitter {
     private log(msg: string) {
         console.log(msg);
         addLocalLog(msg);
-        RemoteLogger.log(msg);
     }
 
     public setProtocolOffset(offset: number) {
